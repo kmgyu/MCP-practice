@@ -1,0 +1,9 @@
+pydantic==2.10.1
+chainlit==2.5.5
+ollama==0.5.1
+langchain
+torch
+pydantic
+langchain
+langgraph
+langchain_community
