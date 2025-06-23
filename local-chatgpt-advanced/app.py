@@ -66,19 +66,54 @@ def decision_making(state: GraphState) -> str:
 
 # Step 5. Dummy Node Examples
 def retrieve_document(state: GraphState) -> GraphState:
-    return state.copy(update={"context": "[dummy retrieved context]"})
+    print("[retrieve_document] 문서 검색 중")
+    # 실제 DB/벡터 스토어에서 검색된 내용이라고 가정
+    context = f"서울의 본사 주소는 ... 입니다."
+    return state.copy(update={"context": context})
+
 
 def general_llm(state: GraphState) -> GraphState:
-    return state.copy(update={"answer": "[dummy general answer]"})
+    print("[general_llm] LLM 응답 생성 중")
+    response = chat.invoke(state.question)  # Ollama LLM
+    return state.copy(update={"answer": response})
 
 def llm_answer(state: GraphState) -> GraphState:
-    return state.copy(update={"answer": "[dummy llm answer based on context]"})
+    print("[llm_answer] context 기반 LLM 응답 생성 중")
+    prompt = f"""문맥: {state.context}\n질문: {state.question}\n답변:"""
+    response = chat.invoke(prompt)
+    return state.copy(update={"answer": response})
+
 
 def search_on_web(state: GraphState) -> GraphState:
-    return state.copy(update={"context": "[dummy web search results]"})
+    print("[search_on_web] 웹 검색 결과를 context에 저장")
+    context = f"{state.question}에 대한 검색 결과: ..."
+    return state.copy(update={"context": context})
+
 
 def relevance_check(state: GraphState) -> GraphState:
-    return state.copy(update={"relevance": "grounded"})
+    print("[relevance_check] context의 신뢰도 판단")
+    judge_prompt = f"""문맥이 질문에 적절한가요?
+
+    문맥:
+    {state.context}
+
+    질문:
+    {state.question}
+
+    답변: grounded / notGrounded / notSure
+    """
+    result = chat.invoke(judge_prompt)
+    result = result.strip().lower()
+
+    if "grounded" in result:
+        relevance = "grounded"
+    elif "notgrounded" in result:
+        relevance = "notGrounded"
+    else:
+        relevance = "notSure"
+
+    return state.copy(update={"relevance": relevance})
+
 
 def is_relevant(state: GraphState) -> str:
     match state.relevance:
@@ -134,15 +169,24 @@ import chainlit as cl
 
 @cl.on_message
 async def run_graph(message: cl.Message):
+    print("원본 입력:", message.content)
+
     translated_input = translate(message.content, 'kor_Kore', 'eng_Latn')
-    
+    print("번역된 영어 입력:", translated_input)
+
     if not translated_input.strip() or translated_input.strip() == ".":
-        await cl.Message(content="입력 내용을 번역할 수 없습니다. 다시 입력해 주세요.").send()
+        await cl.Message(content="입력 내용을 인식하지 못했습니다. 다시 시도해주세요.").send()
         return
 
     state = GraphState(question=translated_input)
     result = app.invoke(state)
+    print("Graph 실행 결과:", result)
+
     answer = result.get("answer") or "[No response]"
+    print("최종 영어 응답:", answer)
 
     translated_output = translate(answer, 'eng_Latn', 'kor_Kore')
+    print("최종 한국어 응답:", translated_output)
+
     await cl.Message(content=translated_output).send()
+
