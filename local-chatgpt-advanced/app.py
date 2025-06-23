@@ -6,6 +6,11 @@ from langchain.prompts import PromptTemplate
 # from langchain.chat_models import ChatOpenAI
 from langgraph.graph import StateGraph, END
 
+import torch
+
+# 전역 디바이스 변수 선언
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 # Step 1. Define State
 class GraphState(BaseModel):
     question: str
@@ -153,22 +158,47 @@ workflow.add_edge("general_llm", END)
 app = workflow.compile()
 
 # Chainlit Integration
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
 def load_translator():
-    from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
-    model_name = "NHNDQ/nllb-finetuned-en2ko"
+    model_name = "yanolja/EEVE-Korean-Instruct-2.8B-v1.0"
+    # removed  trust_remote_code=True parameter. and then it work. i don't know.
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-    return pipeline("translation", model=model, tokenizer=tokenizer, device=0)
+    model = AutoModelForCausalLM.from_pretrained(model_name)
+    model.to(DEVICE)
+    
+    return tokenizer, model
 
-translator = load_translator()
+tokenizer, model = load_translator()
 
-def translate(text, src_lang, tgt_lang):
-    return translator(text, src_lang=src_lang, tgt_lang=tgt_lang)[0]["translation_text"]
+def translate(text: str, src_lang: str, tgt_lang: str) -> str:
+    print(f"input : {text}")
+    if src_lang.startswith("kor") and tgt_lang.startswith("eng"):
+        prompt = f"{text} → 영어로 번역해줘."
+    elif src_lang.startswith("eng") and tgt_lang.startswith("kor"):
+        prompt = f"Translate to Korean: {text}"
+    else:
+        raise ValueError("지원하지 않는 언어 쌍입니다.")
+
+    print("start - model input, tokenizer")
+    model_inputs = tokenizer(prompt, return_tensors="pt")
+    model_inputs = {k: v.to(DEVICE) for k, v in model_inputs.items()}  # ⬅ 반드시 옮기기
+    print('model, generating')
+    print(model_inputs)
+    outputs = model.generate(**model_inputs, max_new_tokens=256)
+    print('model generate complete, batch decoding')
+    output_text = tokenizer.batch_decode(outputs, skip_special_tokens=True)[0]
+    print(f'output_text : {output_text}')
+    
+    # 프롬프트 제거하고 응답만 추출
+    return output_text.split("Assistant:")[-1].strip()
+
 
 import chainlit as cl
 
 @cl.on_message
 async def run_graph(message: cl.Message):
+    print(f"current device: {DEVICE}")
     print("원본 입력:", message.content)
 
     translated_input = translate(message.content, 'kor_Kore', 'eng_Latn')
